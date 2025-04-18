@@ -5,7 +5,6 @@ import uuid
 from dotenv import load_dotenv
 import boto3
 from botocore.exceptions import ClientError
-import time
 import subprocess
 
 # Import our custom modules
@@ -143,9 +142,9 @@ def main():
     
     # Only show target languages that are different from source
     if source_language == "中文 (Chinese)":
-        target_language_options = ["英语 (English)", "法语 (French)", "德语 (German)"]
+        target_language_options = ["英语 (English)", "法语 (French)", "德语 (German)", "日语 (Japanese)", "韩语 (Korean)", "意大利语 (Italian)"]
     else:  # English source
-        target_language_options = ["中文 (Chinese)", "法语 (French)", "德语 (German)"]
+        target_language_options = ["中文 (Chinese)", "法语 (French)", "德语 (German)", "日语 (Japanese)", "韩语 (Korean)", "意大利语 (Italian)"]
     
     target_language = st.sidebar.selectbox(
         "选择目标语言 | Select Target Language",
@@ -189,6 +188,33 @@ def main():
                 "female": "Vicki"
             },
             "name": "German"
+        },
+        "日语 (Japanese)": {
+            "code": "ja-JP", 
+            "translate_code": "ja",
+            "voices": {
+                "male": "Takumi",
+                "female": "Mizuki"
+            },
+            "name": "Japanese"
+        },
+        "韩语 (Korean)": {
+            "code": "ko-KR", 
+            "translate_code": "ko",
+            "voices": {
+                "male": "Seoyeon",  # Amazon Polly only has one Korean voice
+                "female": "Seoyeon"
+            },
+            "name": "Korean"
+        },
+        "意大利语 (Italian)": {
+            "code": "it-IT", 
+            "translate_code": "it",
+            "voices": {
+                "male": "Giorgio",
+                "female": "Bianca"
+            },
+            "name": "Italian"
         }
     }
     
@@ -217,8 +243,8 @@ def main():
         
         processing_method = st.radio(
             "处理方法 | Processing Method",
-            ["AWS MediaConvert (推荐 | Recommended)", "本地 FFmpeg | Local FFmpeg"],
-            index=0
+            ["AWS MediaConvert", "本地 FFmpeg | Local FFmpeg"],
+            index=1
         )
         
         if processing_method == "本地 FFmpeg | Local FFmpeg" and not ffmpeg_installed:
@@ -283,8 +309,15 @@ def main():
                 # Step 3: Translate content
                 status_text.text(f"将内容翻译成{selected_language['name']}... | Translating content to {selected_language['name']}...")
                 try:
+                    # 如果使用 Bedrock，确保传递 bedrock_client
+                    if use_bedrock:
+                        bedrock_client = aws_clients['bedrock']
+                    else:
+                        bedrock_client = None
+                        
                     translated_text = translate_content(
                         aws_clients['translate'],
+                        bedrock_client,
                         transcript,
                         selected_language['translate_code'],
                         selected_source_language['translate_code'],
@@ -299,7 +332,7 @@ def main():
                 # Step 4: Generate speech
                 status_text.text("生成目标语言的语音... | Generating speech in target language...")
                 try:
-                    audio_s3_key = generate_speech(
+                    audio_s3_key, audio_timing = generate_speech(
                         aws_clients['polly'],
                         aws_clients['s3'],
                         bucket_name,
@@ -312,6 +345,11 @@ def main():
                     st.error(f"语音生成失败: {str(e)}")
                     logger.error(f"语音生成失败: {str(e)}")
                     return
+                
+                # 如果有音频时间信息，添加到翻译数据中
+                if audio_timing:
+                    translated_text["audio_timing"] = audio_timing
+                    logger.info(f"添加音频时间信息到翻译数据，共 {len(audio_timing)} 条")
                 
                 # Step 5: Create subtitles if requested
                 subtitle_s3_key = None

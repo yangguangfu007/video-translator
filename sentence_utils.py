@@ -1,5 +1,5 @@
 from logger import get_logger
-
+import re
 # 获取 logger
 logger = get_logger()
 
@@ -135,23 +135,47 @@ def combine_sentences(sentences, target_count):
     logger.info(f"Combined {len(sentences)} sentences into {len(combined_sentences)} sentences")
     return combined_sentences
 
-def format_sentence_for_display(sentence, max_line_length=50):
+
+def split_text_advanced(paragraph):
+    # 添加更多中文标点符号：逗号、句号、问号、感叹号、分号
+    pattern = r'(?<=[、。！？])'
+    segments = re.split(pattern, paragraph)
+    return [seg.strip() for seg in segments if seg.strip()]
+
+def format_sentence_for_display(sentence, max_line_length=50, target_language=None):
     """
     Format a sentence to fit within display constraints.
     If the sentence is too long for one line, it will be split into multiple lines.
+    优先使用目标语言的断句标点符号来拆分行，并根据目标语言设置不同的最大行长度。
     
     Args:
         sentence: The sentence to format
-        max_line_length: Maximum characters per line
+        max_line_length: Maximum characters per line (默认值会根据目标语言自动调整)
+        target_language: 目标语言代码 (如 'en', 'ja', 'zh' 等)
         
     Returns:
         List of formatted lines
     """
+
+    # 根据目标语言调整最大行长度
+    if target_language:
+        if target_language == 'en':
+            max_line_length = 50  # 英文
+        elif target_language == 'ja':
+            max_line_length = 15  # 日语
+        elif target_language in ['zh', 'ko']:
+            max_line_length = 30  # 中文、韩文
+        else:
+            max_line_length = 40  # 其他语言
+
     # If sentence is short enough, return as a single line
     if len(sentence) <= max_line_length:
         return [sentence]
-    
-    words = sentence.split()
+
+    if target_language == 'ja':
+        words = split_text_advanced(sentence)
+    else:
+        words = sentence.split()
     lines = []
     current_line = ""
     

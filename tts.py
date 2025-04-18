@@ -110,9 +110,45 @@ def generate_speech(polly_client, s3_client, bucket_name, translated_data, voice
         original_sentences = extract_sentences(original_words)
         logger.info(f"Extracted {len(original_sentences)} sentences from original transcript")
         
-        # Split translated text into sentences that match the original sentence count - using shared function
-        translated_sentences = split_into_matching_sentences(translated_text, len(original_sentences))
-        logger.info(f"Split translated text into {len(translated_sentences)} sentences")
+        # 记录原始句子的内容，用于调试
+        logger.info("\n===== 原始句子内容 =====")
+        for i, orig_sentence in enumerate(original_sentences):
+            orig_text = " ".join([w["word"] for w in orig_sentence["words"]])
+            logger.info(f"原始句子 {i+1}: {orig_text}")
+        logger.info("===== 原始句子内容结束 =====\n")
+        
+        # 记录翻译文本，用于调试
+        logger.info("\n===== 完整翻译文本 =====")
+        logger.info(translated_text)
+        logger.info("===== 完整翻译文本结束 =====\n")
+        
+        # 尝试使用 AI 拆分方法
+        try:
+            from ai_split import ai_split_sentences
+            # 获取 bedrock 客户端
+            bedrock_client = None
+            try:
+                import boto3
+                bedrock_client = boto3.client('bedrock-runtime', region_name=os.getenv('AWS_REGION', 'us-east-1'))
+                logger.info("成功初始化 Bedrock 客户端用于 AI 拆分")
+            except Exception as e:
+                logger.warning(f"初始化 Bedrock 客户端失败: {str(e)}")
+            
+            # 使用 AI 拆分
+            translated_sentences = ai_split_sentences(translated_text, original_sentences, target_language, bedrock_client)
+            logger.info(f"使用 AI 拆分方法，得到 {len(translated_sentences)} 个句子")
+        except Exception as e:
+            logger.error(f"AI 拆分失败: {str(e)}，回退到手动拆分")
+            # 回退到手动拆分
+            try:
+                from manual_split import manual_split_sentences
+                translated_sentences = manual_split_sentences(translated_text, original_sentences, target_language)
+                logger.info(f"使用手动拆分方法，得到 {len(translated_sentences)} 个句子")
+            except Exception as e2:
+                logger.error(f"手动拆分也失败: {str(e2)}，回退到自动拆分")
+                # 回退到原来的拆分方法
+                translated_sentences = split_into_matching_sentences(translated_text, len(original_sentences))
+                logger.info(f"Split translated text into {len(translated_sentences)} sentences")
         
         # 输出拆分后的原文和翻译文本
         logger.info("\n===== 拆分后的句子对照 =====")
@@ -138,6 +174,52 @@ def generate_speech(polly_client, s3_client, bucket_name, translated_data, voice
         
         # Generate individual audio files for each sentence
         audio_segments = []
+        
+        # 打印更多调试信息
+        logger.info("\n===== 句子匹配调试信息 =====")
+        logger.info(f"原始句子数量: {len(original_sentences)}")
+        logger.info(f"翻译句子数量: {len(translated_sentences)}")
+        
+        # 检查句子长度是否匹配
+        if len(original_sentences) != len(translated_sentences):
+            logger.warning(f"警告: 原始句子数量 ({len(original_sentences)}) 与翻译句子数量 ({len(translated_sentences)}) 不匹配!")
+        
+        # 打印每个句子的详细信息
+        for i in range(max(len(original_sentences), len(translated_sentences))):
+            logger.info(f"\n句子 {i+1} 详细信息:")
+            
+            # 打印原始句子信息
+            if i < len(original_sentences):
+                orig_sentence = original_sentences[i]
+                orig_text = " ".join([w["word"] for w in orig_sentence["words"]])
+                orig_start = orig_sentence["start"]
+                orig_end = orig_sentence["end"]
+                orig_duration = orig_end - orig_start
+                logger.info(f"  原始句子: {orig_text}")
+                logger.info(f"  原始时间范围: {orig_start:.2f}s - {orig_end:.2f}s (持续时间: {orig_duration:.2f}s)")
+            else:
+                logger.info("  原始句子: [超出索引范围]")
+            
+            # 打印翻译句子信息
+            if i < len(translated_sentences):
+                trans_sentence = translated_sentences[i]
+                logger.info(f"  翻译句子: {trans_sentence}")
+                logger.info(f"  翻译句子长度: {len(trans_sentence)} 字符")
+            else:
+                logger.info("  翻译句子: [超出索引范围]")
+        
+        logger.info("===== 句子匹配调试信息结束 =====\n")
+        
+        # 打印zip后的匹配情况
+        logger.info("\n===== ZIP匹配后的句子对照 =====")
+        for i, (sentence, timing) in enumerate(zip(translated_sentences, original_sentences)):
+            orig_text = " ".join([w["word"] for w in timing["words"]])
+            logger.info(f"匹配 {i+1}:")
+            logger.info(f"  原文: {orig_text}")
+            logger.info(f"  译文: {sentence}")
+            logger.info(f"  时间范围: {timing['start']:.2f}s - {timing['end']:.2f}s")
+            logger.info("---")
+        logger.info("===== ZIP匹配后的句子对照结束 =====\n")
         
         for i, (sentence, timing) in enumerate(zip(translated_sentences, original_sentences)):
             try:
@@ -211,11 +293,54 @@ def generate_speech(polly_client, s3_client, bucket_name, translated_data, voice
             inputs = ["-i", silent_path]
             filter_complex = ""
             
+            # 检查是否有重叠的音频片段
+            for i in range(len(audio_segments)-1):
+                current = audio_segments[i]
+                next_seg = audio_segments[i+1]
+                
+                # 如果当前片段的结束时间超过了下一个片段的开始时间-2s，调整当前片段的结束时间
+                if current["start"] + current["duration"] - 2> next_seg["start"]:
+                    logger.warning(f"检测到音频重叠: 片段 {i+1} 结束时间 ({current['start'] + current['duration']:.2f}s) 超过了片段 {i+2} 开始时间 ({next_seg['start']:.2f}s)")
+                    logger.info("采用顺序播放策略，重新计算音频时间")
+                    
+                    # 重新计算所有片段的开始和结束时间，采用顺序播放策略
+                    current_time = 0
+                    for j, segment in enumerate(audio_segments):
+                        # 记录原始时间信息，用于调试
+                        orig_start = segment["start"]
+                        orig_end = orig_start + segment["duration"]
+                        
+                        # 更新为顺序播放的时间
+                        segment["sequential_start"] = current_time
+                        segment["sequential_end"] = current_time + segment["duration"]
+                        
+                        logger.info(f"片段 {j+1}: 原始时间 {orig_start:.2f}s-{orig_end:.2f}s -> 顺序时间 {segment['sequential_start']:.2f}s-{segment['sequential_end']:.2f}s")
+                        
+                        # 更新当前时间
+                        current_time += segment["duration"] + 0.1  # 添加0.1秒间隔
+                    
+                    # 设置标志，表示使用顺序播放策略
+                    use_sequential_timing = True
+                    break
+            else:
+                # 如果没有检测到重叠，使用原始时间
+                use_sequential_timing = False
+                logger.info("未检测到音频重叠，使用原始时间策略")
+            
+            # 使用一个更简单的方法：创建一个静音音频，然后在适当的时间点添加每个音频片段
+            inputs = ["-i", silent_path]
+            filter_complex = ""
+            
+            # 添加所有音频输入
             for i, audio in enumerate(audio_segments):
                 inputs.extend(["-i", audio["path"]])
                 
-                # Calculate delay in milliseconds
-                delay_ms = int(audio["start"] * 1000)
+                # 根据播放策略选择延迟时间
+                if use_sequential_timing:
+                    delay_ms = int(audio["sequential_start"] * 1000)
+                else:
+                    # 使用原始时间
+                    delay_ms = int(audio["start"] * 1000)
                 
                 # Add audio at the exact start time
                 filter_complex += f"[{i+1}:a]adelay={delay_ms}|{delay_ms}[a{i}];"
@@ -243,6 +368,22 @@ def generate_speech(polly_client, s3_client, bucket_name, translated_data, voice
         final_duration = get_audio_duration(final_audio_path)
         logger.info(f"Final audio duration: {final_duration:.2f}s (original: {max_end_time:.2f}s)")
         
+        # 如果使用了顺序播放策略，保存音频时间信息，供字幕使用
+        if use_sequential_timing:
+            audio_timing = []
+            for segment in audio_segments:
+                audio_timing.append({
+                    "index": segment["index"],
+                    "sequential_start": segment["sequential_start"],
+                    "sequential_end": segment["sequential_end"],
+                    "original_start": segment["start"],
+                    "original_end": segment["start"] + segment["duration"],
+                    "duration": segment["duration"]
+                })
+            logger.info(f"生成顺序播放时间信息，共 {len(audio_timing)} 条")
+        else:
+            audio_timing = None
+        
         # Upload the audio file to S3
         audio_s3_key = f"audio/{uuid.uuid4()}.mp3"
         s3_client.upload_file(final_audio_path, bucket_name, audio_s3_key)
@@ -268,7 +409,8 @@ def generate_speech(polly_client, s3_client, bucket_name, translated_data, voice
             logger.error(f"Failed to clean up temporary directory {temp_dir}: {str(e)}")
             # This is not a critical error, so we can continue
         
-        return audio_s3_key
+        # 返回音频S3键和时间信息
+        return audio_s3_key, audio_timing
     
     except Exception as e:
         logger.error(f"Error in generate_speech: {str(e)}")
