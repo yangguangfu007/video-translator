@@ -1,57 +1,110 @@
-# 视频翻译器 (Video Translator)
+# 多语言视频翻译器
 
-一个自动将视频翻译成其他语言的工具，支持字幕和配音。
+这是一个基于AWS服务和大语言模型的应用程序，可以将中文视频翻译成英文、法语和德语。应用程序会自动处理视频的语音和字幕，确保音画同步。
 
-## 支持的语言
+## 架构图
+![img.png](img.png)
 
-### 源语言
-- 中文 (Chinese)
-- 英文 (English)
+## 功能特点
 
-### 目标语言
-- 英语 (English)
-- 中文 (Chinese)
-- 法语 (French)
-- 德语 (German)
-- 日语 (Japanese)
-- 韩语 (Korean)
-- 意大利语 (Italian)
+1. **视频语音翻译**
+   - 将中文视频的语音翻译并转换为英文、法语或德语
+   - 使用自然的语音合成，保持原始语调和情感
 
-## 字幕处理逻辑
+2. **字幕翻译与同步**
+   - 自动提取原始视频中的语音内容
+   - 翻译字幕内容到目标语言
+   - 确保字幕与语音同步
 
-字幕显示时长与拆分后的音频时长一致，遵循以下规则：
+3. **大模型增强翻译**
+   - 利用Amazon Bedrock上的大语言模型进行高质量翻译
+   - 保持语境和文化适应性
 
-1. 每条字幕最多显示2行
-2. 如果字幕超过2行，则拆分成多条字幕显示
-3. 显示时长按照公式计算：
-   - 基本时长 = 原始音频时长 / 拆分后的字幕条数
-   - 如果最后一条字幕只有1行，显示时间缩短为：基本时长/2 + 1秒
+4. **视频处理**
+   - 合成新的语音与原始视频
+   - 添加翻译后的字幕
+   - 保持视频质量和音画同步
 
-### 示例
+## 技术架构
 
-如果一条字幕的时间范围是2秒～23秒，一共有5行字幕：
-- 拆分为5/2=3条字幕
-- 每条字幕的基本显示时长为(23-2)/3 = 7秒
-- 最后一条字幕因为只有1行，显示时间缩短为 7/2 + 1 = 4.5秒
+- **前端**: Streamlit
+- **后端服务**:
+  - Amazon Transcribe: 语音识别
+  - Amazon Bedrock: 高质量翻译
+  - Amazon Translate: 辅助翻译
+  - Amazon Polly: 语音合成
+  - Amazon S3: 存储视频和音频文件
+  - Amazon MediaConvert: 视频处理和合成
 
-## 日志系统
+## 前提条件
 
-日志文件按小时生成，存储在项目目录下的 `logs` 文件夹中：
-- 文件名格式：`video_translator_YYYY-MM-DD_HH.log`
-- 例如：`video_translator_2025-04-17_23.log`
+- Python 3.8+
+- AWS账户，具有以下服务的访问权限：
+  - Amazon Transcribe
+  - Amazon Translate
+  - Amazon Polly
+  - Amazon S3
+  - Amazon MediaConvert
+  - Amazon Bedrock
+- 配置好的AWS CLI凭证
 
-## 主要功能
+## 安装步骤
 
-1. 视频转录：识别视频中的语音并转换为文本
-2. 文本翻译：将识别出的文本翻译成目标语言
-3. 语音合成：将翻译后的文本转换为语音
-4. 字幕生成：创建与翻译文本匹配的字幕
-5. 视频处理：将翻译后的音频和字幕与原始视频合并
+1. 克隆仓库:
+   ```
+   git clone https://github.com/yourusername/video-translator.git
+   cd video-translator
+   ```
 
-## 技术栈
+2. 创建并激活虚拟环境:
+   ```
+   python -m venv venv
+   source venv/bin/activate  # 在Windows上使用 `venv\Scripts\activate`
+   ```
 
-- AWS Transcribe：语音识别
-- AWS Translate/Bedrock：文本翻译
-- AWS Polly：语音合成
-- FFmpeg：视频处理
-- Streamlit：用户界面
+3. 安装所需的包:
+   ```
+   pip install -r requirements.txt
+   ```
+
+4. 设置AWS资源:
+   ```
+   python setup_aws_resources.py --bucket-name your-unique-bucket-name
+   ```
+
+5. 编辑`.env`文件，添加您的AWS凭证:
+   ```
+   AWS_ACCESS_KEY_ID=your_access_key_id
+   AWS_SECRET_ACCESS_KEY=your_secret_access_key
+   BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
+   ```
+
+## 使用方法
+
+1. 运行Streamlit应用:
+   ```
+   streamlit run app.py
+   ```
+
+2. 在浏览器中打开Streamlit提供的URL（通常是 http://localhost:8501）。
+
+3. 上传中文视频并选择目标语言（英语、法语或德语）。
+
+4. 点击"开始翻译"按钮，等待处理完成。
+
+5. 下载翻译后的视频。
+
+## 工作流程
+
+1. **上传视频**: 用户上传中文视频文件
+2. **选择目标语言**: 用户选择英语、法语或德语作为目标语言
+3. **语音识别**: 使用Amazon Transcribe从原始视频中提取中文语音内容
+4. **内容翻译**: 使用Amazon Bedrock大语言模型将提取的内容翻译成目标语言
+5. **语音合成**: 使用Amazon Polly将翻译后的文本转换为目标语言的语音
+6. **字幕生成**: 创建翻译后的字幕文件，确保与新语音同步
+7. **视频处理**: 使用Amazon MediaConvert将新语音和字幕与原始视频合并
+8. **结果下载**: 用户可以下载翻译后的视频文件
+
+## 安全说明
+
+此应用程序需要AWS凭证才能运行。确保您的AWS凭证安全，不要公开共享。建议在生产环境中部署此应用程序时，使用遵循最小权限原则的IAM角色。
